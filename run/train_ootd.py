@@ -2,9 +2,8 @@ import sys
 import os
 from shutil import copyfile
 import argparse
-from utils.dataset import DressCodeDataLoader, DressCodeDataset
+from utils.dataset import VITONDataset, VITONDataLoader
 sys.path.append(r'../ootd')
-CUDIA_VISIBLE_DEVICES = 0,1
 # models import
 from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer
 from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
@@ -15,7 +14,6 @@ from diffusers import UniPCMultistepScheduler, PNDMScheduler
 from pipelines_ootd.unet_vton_2d_condition import UNetVton2DConditionModel
 from pipelines_ootd.unet_garm_2d_condition import UNetGarm2DConditionModel
 
-# train tools import
 from tqdm import tqdm
 import torch
 import torch.nn.functional as F
@@ -92,16 +90,20 @@ def get_args():
 args = get_args()
 
 #-----prepare dataset-----
-test_dataset = DressCodeDataset(args, "test")
-test_loader = DressCodeDataLoader(args, test_dataset)
-train_dataset = DressCodeDataset(args, "train")
-train_dataloader =DressCodeDataLoader(args, train_dataset)
+test_dataset = VITONDataset(args, "test")
+test_loader = VITONDataLoader(args, test_dataset)
+train_dataset = VITONDataset(args, "train")
+train_dataloader = VITONDataLoader(args, train_dataset)
 train_dataloader = train_dataloader.data_loader
 
 #-----load models-----
 vae = AutoencoderKL.from_pretrained(args.vae_path)
+
 unet_garm = UNetGarm2DConditionModel.from_pretrained(args.unet_path,use_safetensors=True)
 unet_vton = UNetVton2DConditionModel.from_pretrained(args.unet_path,use_safetensors=True)
+# unet_garm = torch.nn.DataParallel(unet_garm)
+# unet_vton = torch.nn.DataParallel(unet_vton)
+
 noise_scheduler = PNDMScheduler.from_pretrained(args.scheduler_path)
 auto_processor = AutoProcessor.from_pretrained(args.vit_path)
 image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.vit_path)
@@ -144,6 +146,7 @@ unet_vton.train()
 #-----set training environment-----
 # run on gpu
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.cuda.empty_cache()
 
 # training type
 weight_dtype=torch.float32
@@ -195,8 +198,8 @@ scaler = torch.cuda.amp.GradScaler()
 def tokenize_captions(captions, max_length):
     inputs = tokenizer(
         captions, max_length=max_length, padding="max_length", truncation=True, return_tensors="pt"
-    ).input_ids.cuda()
-    return inputs
+    )
+    return inputs.input_ids
 
 # load checkpoint
 if args.checkpoint_path:
@@ -219,51 +222,59 @@ for epoch in tqdm(range(first_epoch, train_epochs)):
         
         optimizer.zero_grad()
         
-        image_garm = batch['garm'].cuda().to(dtype=weight_dtype)
-        image_vton = batch['img_agnostic'].cuda().to(dtype=weight_dtype)
-        image_ori = batch['img'].cuda().to(dtype=weight_dtype)
+        # get original image data
+        image_garm = batch['garm']['paired'].to(device).to(dtype=weight_dtype)
+        image_vton = batch['img_agnostic'].to(device).to(dtype=weight_dtype)
+        image_ori = batch['img'].to(device).to(dtype=weight_dtype)
 
-        prompt_image = auto_processor(images=image_garm, return_tensors="pt").data['pixel_values'].cuda()
+        # get garment prompt embeddings
+        prompt_image = auto_processor(images=image_garm, return_tensors="pt").data['pixel_values'].to(device)
         prompt_image = image_encoder(prompt_image).image_embeds
         prompt_image = prompt_image.unsqueeze(1)
         
         if model_type == 'hd':
-            prompt_embeds = text_encoder(tokenize_captions(['']*batch_size, 2).cuda())[0]
+            prompt_embeds = text_encoder(tokenize_captions(['']*batch_size, 2).to(device))[0]
             prompt_embeds[:, 1:] = prompt_image[:]
             
         elif model_type == 'dc':
-            prompt_embeds = text_encoder(tokenize_captions(batch["label"], 3))[0].cuda()
+            prompt_embeds = text_encoder(tokenize_captions(batch['label'], 3))[0]
             prompt_embeds = torch.cat([prompt_embeds, prompt_image], dim=1)
         else:
             raise ValueError("model_type must be 'hd' or 'dc'!")
-
-        image_garm = image_processor.preprocess(image_garm)
-        image_vton = image_processor.preprocess(image_vton)
-        image_ori = image_processor.preprocess(image_ori)
-
-        latents = vae.encode(image_ori).latent_dist.sample()
-        latents = latents * vae.config.scaling_factor
-
-        noise = torch.randn_like(latents)
-        bsz = latents.shape[0]
-        timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,)).cuda()
-        timesteps = timesteps.long()
-
-        noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-
-        prompt_embeds = prompt_embeds.cuda().to(dtype=weight_dtype)
-
+        
+        prompt_embeds = prompt_embeds.to(dtype=weight_dtype, device=device) 
         bs_embed, seq_len, _ = prompt_embeds.shape
         num_images_per_prompt = 1
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
         prompt_embeds = prompt_embeds.view(bs_embed * num_images_per_prompt, seq_len, -1)
 
+        # original image data preprocess
+        image_garm = image_processor.preprocess(image_garm)
+        image_vton = image_processor.preprocess(image_vton)
+        image_ori = image_processor.preprocess(image_ori)
+
+        # get model img latents
+        latents = vae.encode(image_ori).latent_dist.sample()
+        latents = latents * vae.config.scaling_factor
+
+        # add noise to latents
+        noise = torch.randn_like(latents)
+        bsz = latents.shape[0]
+        
+        timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=device)
+        timesteps = timesteps.long()
+        
+        noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+        # get garm and vton img latents
         image_latents_garm = vae.encode(image_garm).latent_dist.mode()
         image_latents_garm = torch.cat([image_latents_garm], dim=0).to(dtype=weight_dtype)
 
         image_latents_vton = vae.encode(image_vton).latent_dist.mode()
         image_latents_vton = torch.cat([image_latents_vton], dim=0)
+        latent_vton_model_input = torch.cat([noisy_latents, image_latents_vton], dim=1).to(dtype=weight_dtype)
 
+        # outfitting dropout
         if args.conditioning_dropout_prob is not None:
             random_p = torch.rand(bsz, device=latents.device)
             image_mask_dtype = image_latents_garm.dtype
@@ -274,17 +285,17 @@ for epoch in tqdm(range(first_epoch, train_epochs)):
             image_mask = image_mask.reshape(bsz, 1, 1, 1)
             image_latents_garm = image_mask * image_latents_garm
         
-        with torch.cuda.amp.autocast():
+        with torch.cuda.amp.autocast():       
+            # outfitting fusion
             sample, spatial_attn_outputs = unet_garm(
                 image_latents_garm,
                 0,
                 encoder_hidden_states=prompt_embeds,
                 return_dict=False,
             )
-            latent_vton_model_input = torch.cat([noisy_latents, image_latents_vton], dim=1).to(dtype=weight_dtype)
-
             spatial_attn_inputs = spatial_attn_outputs.copy()
 
+            # outfitting denoising
             noise_pred = unet_vton(
                 latent_vton_model_input,
                 spatial_attn_inputs,
@@ -293,11 +304,13 @@ for epoch in tqdm(range(first_epoch, train_epochs)):
                 return_dict=False,
             )[0]  
         
+            # calculate loss
             noise_loss= F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
-        
-            loss = noise_loss 
+            loss = noise_loss
+            
             torch.cuda.empty_cache()
 
+        # backpropagation
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
@@ -309,10 +322,11 @@ for epoch in tqdm(range(first_epoch, train_epochs)):
     epoch_loss /= len(train_dataloader)
     loss_log.append(epoch_loss)
     logger.info(f"Training loss: {epoch_loss} at epoch {epoch}")
-    with open(loss_log_file, "w") as f:
+    with open(loss_log_file, "a") as f:
         f.write(f"Epoch {epoch}: Loss {epoch_loss}\n")
 
-    if (epoch % 5 == 0 and epoch != 0) or epoch == (args.train_epochs - 1) or epoch == 0:
+    # save checkpoints
+    if (epoch % 5 == 0 and epoch != 0) or epoch == (args.train_epochs - 1) :
         state_dict_unet_vton = unet_vton.state_dict()
         for key in state_dict_unet_vton.keys():
             state_dict_unet_vton[key] = state_dict_unet_vton[key].to('cpu')
