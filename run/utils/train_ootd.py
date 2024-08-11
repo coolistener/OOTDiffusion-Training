@@ -2,7 +2,7 @@ import sys
 import os
 from shutil import copyfile, rmtree
 import argparse
-from utils.dataset import DressCodeDataLoader, DressCodeDataset
+from utils.dataset import VITONDataset, VITONDataLoader
 sys.path.append(r'../ootd')
 CUDIA_VISIBLE_DEVICES = 0,1
 # models import
@@ -93,10 +93,10 @@ def get_args():
 args = get_args()
 
 #-----prepare dataset-----
-test_dataset = DressCodeDataset(args, "test")
-test_loader = DressCodeDataLoader(args, test_dataset)
-train_dataset = DressCodeDataset(args, "train")
-train_dataloader =DressCodeDataLoader(args, train_dataset)
+test_dataset = VITONDataset(args, "test")
+test_loader = VITONDataLoader(args, test_dataset)
+train_dataset = VITONDataset(args, "train")
+train_dataloader =VITONDataLoader(args, train_dataset)
 train_dataloader = train_dataloader.data_loader
 
 #-----load models-----
@@ -235,7 +235,7 @@ for epoch in tqdm(range(first_epoch, train_epochs)):
             prompt_embeds[:, 1:] = prompt_image[:]
             
         elif model_type == 'dc':
-            prompt_embeds = text_encoder(tokenize_captions(prompt).to(device))[0]
+            prompt_embeds = text_encoder(tokenize_captions(prompt))[0]
             prompt_embeds = torch.cat([prompt_embeds, prompt_image], dim=1)
         else:
             raise ValueError("model_type must be 'hd' or 'dc'!")

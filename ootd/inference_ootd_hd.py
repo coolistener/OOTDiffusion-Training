@@ -26,7 +26,8 @@ from transformers import CLIPTextModel, CLIPTokenizer
 
 VIT_PATH = "../checkpoints/clip-vit-large-patch14"
 VAE_PATH = "../checkpoints/ootd"
-UNET_PATH = "../checkpoints/ootd/ootd_hd/checkpoint-36000"
+# UNET_PATH = "../checkpoints/ootd/ootd_hd/checkpoint-36000"
+UNET_PATH = "./train/checkpoints_hd/epoch_0"
 MODEL_PATH = "../checkpoints/ootd"
 
 class OOTDiffusionHD:
