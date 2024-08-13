@@ -52,7 +52,7 @@ def get_args():
     parser.add_argument('--img_height', type=int, default=512)
     parser.add_argument('--img_width', type=int, default=384)
     parser
-    parser.add_argument('--num_workers', type=int, default=4)
+    parser.add_argument('--num_workers', type=int, default=3)
     parser.add_argument('--semantic_nc', type=int, default=13, help='# of human-parsing map classes')
 
     # paths
@@ -329,7 +329,7 @@ for epoch in tqdm(range(first_epoch, train_epochs)):
         f.write(f"Epoch {epoch}: Loss {epoch_loss}\n")
 
     # save checkpoints
-    if (epoch%10==0) or epoch == (args.train_epochs - 1):
+    if (epoch%5==0) or epoch == (args.train_epochs - 1):
         save_dir=f"./train/checkpoints_{model_type}"
         checkpoints=os.listdir(save_dir)
         checkpoints = [d for d in checkpoints if d.startswith("epoch")]
@@ -342,7 +342,7 @@ for epoch in tqdm(range(first_epoch, train_epochs)):
             )
             logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
             for removing_checkpoint in removing_checkpoints:
-                removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
+                removing_checkpoint = os.path.join(save_dir, removing_checkpoint)
                 rmtree(removing_checkpoint)
                 
         state_dict_unet_vton = unet_vton.state_dict()
