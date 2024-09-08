@@ -65,9 +65,14 @@ if __name__ == '__main__':
     mask = mask.resize((768, 1024), Image.NEAREST)
     mask_gray = mask_gray.resize((768, 1024), Image.NEAREST)
     
+    # resize to 384x512 for input
     masked_vton_img = Image.composite(mask_gray, model_img, mask)
     masked_vton_img.save('./images_output/mask.jpg')
-
+    masked_vton_img = masked_vton_img.resize((384, 512), Image.NEAREST)
+    cloth_img = cloth_img.resize((384, 512), Image.NEAREST)
+    mask = mask.resize((384, 512), Image.NEAREST)
+    model_img = model_img.resize((384, 512), Image.NEAREST)    
+    
     images = model(
         model_type=model_type,
         category=category_dict[category],
@@ -83,5 +88,6 @@ if __name__ == '__main__':
 
     image_idx = 0
     for image in images:
+        image= image.resize((768, 1024),Image.NEAREST)
         image.save('./images_output/out_' + model_type + '_' + str(image_idx) + '.png')
         image_idx += 1

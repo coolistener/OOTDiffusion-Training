@@ -16,5 +16,4 @@ python train_ootd.py \
   --tokenizer_path "../models/stable-diffusion-v1-5/tokenizer" \
   --text_encoder_path "../models/stable-diffusion-v1-5/text_encoder" \
   --scheduler_path "../models/stable-diffusion-v1-5/scheduler/scheduler_config.json" \
-  --first_epoch 5 \
-  --checkpoint_path './train/checkpoints_dc/epoch_4/checkpoint-epoch4.pt'
+  --first_epoch 0 \
