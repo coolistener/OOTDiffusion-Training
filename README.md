@@ -8,7 +8,7 @@ This repository is an unofficial implementation of OOTDiffusion training part.
 
 The code supports the training on [VITON-HD](https://github.com/shadow2496/VITON-HD) (half-body) and [Dress Code](https://github.com/aimagelab/dress-code) (full-body).
 
-<img width="788" alt="image" src="https://github.com/user-attachments/assets/d6644728-7a7d-4894-825a-148b1982aafa">
+<img width="786" alt="image" src="https://github.com/user-attachments/assets/578cdc18-57c1-4d05-abe1-82e20bbe7566">
 
 ## Installation
 1. Clone the repository
